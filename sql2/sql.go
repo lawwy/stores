@@ -275,25 +275,25 @@ func (s *SqlBackend) TableFieldDefinition(field reflect.StructField) string {
 	def := ""
 	switch field.Type.Kind() {
 	case reflect.Bool:
-		def = "BOOLEAN"
+		def = "BOOLEAN DEFAULT false"
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uintptr, reflect.Int64, reflect.Uint64:
 		if name == s.pk {
 			def = "INT AUTO_INCREMENT PRIMARY KEY"
 		} else {
-			def = "INT"
+			def = "INT DEFAULT 0"
 		}
 	case reflect.Float32, reflect.Float64:
-		def = "DOUBLE NULL"
+		def = "DOUBLE DEFAULT 0"
 	case reflect.String:
-		def = "TEXT NULL"
+		def = "VARCHAR(255) DEFAULT ''"
 		if name == s.pk {
-			def = "TEXT PRIMARY KEY"
+			def = "VARCHAR(255) PRIMARY KEY"
 		}
 	case reflect.Struct:
 		//QUESTIONS:如何满足各种struct类型的要求？proto中的timestamp如何处理(是否需要这样的兼容)？
 		//如兼容需要在db读写过程进行字段值的转换，转换方法如何定？
 		if field.Type.PkgPath() == "time" {
-			def = "DATETIME"
+			def = "DATETIME DEFAULT CURRENT_TIMESTAMP"
 		}
 	}
 	return name + " " + def
