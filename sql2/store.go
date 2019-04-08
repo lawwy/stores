@@ -7,7 +7,6 @@ import (
 	"errors"
 	"reflect"
 	"strconv"
-	"strings"
 )
 
 func (s *SqlBackend) Write(key string, model interface{}) error {
@@ -22,9 +21,10 @@ func (s *SqlBackend) Write(key string, model interface{}) error {
 			return err
 		}
 		v := reflect.Indirect(reflect.ValueOf(model))
-		idv := v.FieldByNameFunc(func(f string) bool {
-			return strings.ToLower(f) == s.pk
-		})
+		idv := v.FieldByName(s.pk)
+		// idv := v.FieldByNameFunc(func(f string) bool {
+		// 	return strings.ToLower(f) == s.pk
+		// })
 		idv.SetInt(id)
 		return nil
 	}
