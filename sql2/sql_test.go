@@ -2,6 +2,7 @@ package sql2
 
 import (
 	"os"
+	"reflect"
 	"testing"
 	"time"
 
@@ -57,6 +58,12 @@ func Test_Curd(t *testing.T) {
 	err = sql.Migrate(&Demo1{})
 	check(err)
 	defer sql.Drop(&Demo1{})
+	dd := []*Demo1{}
+	err = sql.List(&dd)
+	check(err)
+	if len(dd) != 0 {
+		t.Fatal("empty get fail")
+	}
 	r := &Demo1{
 		Name:    "n1",
 		Content: "n1",
@@ -91,6 +98,60 @@ func Test_Curd(t *testing.T) {
 	_ = sql.List(&nrr)
 	if len(nrr) != 0 {
 		t.Fatal("delete fail")
+	}
+}
+
+func Test_Paginate(t *testing.T) {
+	check := CheckErrFunc(t)
+	err := godotenv.Load("../.env")
+	check(err)
+	db, _ := NewDB(os.Getenv("SQL_TYPE"), os.Getenv("SQL_CONNECTION"))
+	sql, _ := NewSqlBackend(db)
+	sql.SetFieldMapper(LowerFieldMapper)
+	sql.SetPKField("id")
+	sql.SetTable("demo1")
+	err = sql.Migrate(&Demo1{})
+	defer sql.Drop(&Demo1{})
+	ndd := []*Demo1{
+		&Demo1{
+			Name:    "name1",
+			Content: "content1",
+		},
+		&Demo1{
+			Name:    "name2",
+			Content: "content2",
+		},
+		&Demo1{
+			Name:    "name3",
+			Content: "content3",
+		},
+		&Demo1{
+			Name:    "name4",
+			Content: "content4",
+		},
+	}
+	for _, d := range ndd {
+		_, err = sql.Insert(d)
+		check(err)
+	}
+	dd := []*Demo1{}
+	err = sql.Paginate(&dd, 1, 2)
+	check(err)
+	// fmt.Println(dd[0])
+	want := []*Demo1{
+		&Demo1{
+			ID:      2,
+			Name:    "name2",
+			Content: "content2",
+		},
+		&Demo1{
+			ID:      3,
+			Name:    "name3",
+			Content: "content3",
+		},
+	}
+	if !reflect.DeepEqual(&dd, &want) {
+		t.Fatal("paginate fail")
 	}
 }
 

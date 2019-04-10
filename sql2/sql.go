@@ -18,6 +18,7 @@ type Backend interface {
 	Delete(int64, interface{}) error
 	List(interface{}) error
 	Update(int64, interface{}) error
+	Paginate(interface{}, int, int) error
 }
 
 type Builder interface {
@@ -245,6 +246,36 @@ func (s *SqlBackend) List(list interface{}) error {
 		return err
 	}
 	return nil
+}
+
+func (s *SqlBackend) Paginate(list interface{}, offset int, limit int) error {
+	lv := reflect.ValueOf(list).Elem()             //切片值(非指针)
+	t := reflect.TypeOf(list).Elem().Elem().Elem() //切片成员类型(非指针)
+	ff := StructFields(t, s.Filter("List"))
+	query := s.Sql("List", s.TableName(t.Name()), ff) + " " + s.pageCond(offset, limit)
+	fmt.Println("Paginate:", query)
+	rows, err := s.DB.Query(query)
+	defer rows.Close()
+	for rows.Next() {
+		vptr := reflect.New(t)
+		ptrs := FieldsPointers(reflect.Indirect(vptr), ff)
+		err := rows.Scan(ptrs...)
+		if err != nil {
+			return err
+		}
+		lv.Set(reflect.Append(lv, vptr))
+	}
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *SqlBackend) pageCond(offset int, limit int) string {
+	// if s.pk != "" {
+	// 	return fmt.Sprintf("%s > %s limit %s", s.pk, offset, limit)
+	// }
+	return fmt.Sprintf("limit %d,%d", offset, limit)
 }
 
 func (s *SqlBackend) Delete(key int64, model interface{}) error {
