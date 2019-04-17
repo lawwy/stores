@@ -68,20 +68,20 @@ func TestStore(t *testing.T) {
 		UpdatedAt: ptypes.TimestampNow(),
 		Others:    "others1",
 	}
-	err = store.Write("id1", demo)
+	err = store.Write(demo.Id, demo)
 	if err != nil {
 		t.Fatal("write fail", err)
 	}
 
 	demo2 := &Demo{}
-	err = store.Read("id1", demo2)
+	err = store.Read(demo.Id, demo2)
 	if err != nil || !equalDemo(demo, demo2) {
 		t.Fatal("read fail", err)
 	}
 
 	demo.Name = "name2"
 	err = store.Write(demo.Id, demo)
-	_ = store.Read("id1", demo2)
+	_ = store.Read(demo.Id, demo2)
 	if err != nil || !equalDemo(demo, demo2) {
 		t.Fatal("update fail", err)
 	}
@@ -93,8 +93,8 @@ func TestStore(t *testing.T) {
 	}
 
 	var empty *Demo
-	err = store.Write("id1", empty)
-	notExistErr := store.Read("id1", &Demo{})
+	err = store.Write(demo.Id, empty)
+	notExistErr := store.Read(demo.Id, &Demo{})
 	if err != nil || notExistErr != sql.ErrNoRows {
 		t.Fatal("delete fail", err, notExistErr)
 	}
