@@ -16,6 +16,8 @@ var (
 	OriginTimeType     = reflect.TypeOf(time.Now())
 )
 
+var SEP string = ";"
+
 type Store interface {
 	Write(interface{}, interface{}) error
 	Read(interface{}, interface{}) error // key, out set value interface{}
@@ -177,7 +179,7 @@ func (def *Descriptor) RecordToModel(raw map[string]interface{}, model interface
 		if !def.fieldFilter(ft) {
 			continue
 		}
-		// fmt.Println(fv.Kind())
+		// fmt.Println(fv.Kind(), ft.Name)
 		switch fv.Kind() {
 		//TODO:proto中的timestamp类型转换
 		case reflect.String:
@@ -205,6 +207,12 @@ func (def *Descriptor) RecordToModel(raw map[string]interface{}, model interface
 				fv.Set(reflect.ValueOf(_v))
 				break
 			}
+		case reflect.Slice:
+			if ft.Type.Elem().Kind() == reflect.String {
+				_v := v.([]uint8)
+				_s := B2S(_v)
+				fv.Set(reflect.ValueOf(strings.Split(_s, SEP)))
+			}
 		}
 
 	}
@@ -224,6 +232,11 @@ func (def *Descriptor) ModelToRecord(model interface{}, raw map[string]interface
 		if ft.Type == ProtoTimestampType {
 			t, _ := ptypes.Timestamp(fv.Interface().(*timestamp.Timestamp))
 			raw[ft.Name] = t
+			continue
+		}
+		if fv.Kind() == reflect.Slice && ft.Type.Elem().Kind() == reflect.String {
+			ss, _ := fv.Interface().([]string)
+			raw[ft.Name] = strings.Join(ss, SEP)
 			continue
 		}
 		raw[ft.Name] = fv.Interface()

@@ -3,6 +3,7 @@ package sql4
 import (
 	"database/sql"
 	"os"
+	"reflect"
 	"testing"
 	"time"
 
@@ -23,6 +24,7 @@ type Demo struct {
 	B         bool                 `json:"b"`
 	CreatedAt time.Time            `json:"createdAt"`
 	UpdatedAt *timestamp.Timestamp `json:"updatedAt"`
+	Keywords  []string             `json:"keywords"`
 	Others    string               `json:"-"`
 }
 
@@ -39,7 +41,8 @@ func setupSql() *SqlBackend {
 func equalDemo(d1 *Demo, d2 *Demo) bool {
 	timediff := d1.CreatedAt.Unix() - d2.CreatedAt.Unix() //QUESTION:时间有一点偏差
 	protoTimediff := d1.UpdatedAt.GetSeconds() - d2.UpdatedAt.GetSeconds()
-	if d1.Id == d2.Id && d1.Name == d2.Name && d1.Content == d2.Content && d1.I1 == d2.I1 && d1.I32 == d2.I32 && d1.I64 == d1.I64 && d1.F32 == d2.F32 && d1.F64 == d2.F64 && d1.B == d2.B && (timediff < 50 && timediff > -50) && (protoTimediff < 5 && protoTimediff > -5) {
+	isKeywordSame := reflect.DeepEqual(d1.Keywords, d2.Keywords)
+	if d1.Id == d2.Id && d1.Name == d2.Name && d1.Content == d2.Content && d1.I1 == d2.I1 && d1.I32 == d2.I32 && d1.I64 == d1.I64 && d1.F32 == d2.F32 && d1.F64 == d2.F64 && d1.B == d2.B && (timediff < 50 && timediff > -50) && (protoTimediff < 5 && protoTimediff > -5) && isKeywordSame {
 		return true
 	}
 	return false
@@ -67,6 +70,7 @@ func TestStore(t *testing.T) {
 		CreatedAt: time.Now(),
 		UpdatedAt: ptypes.TimestampNow(),
 		Others:    "others1",
+		Keywords:  []string{"hello", "world"},
 	}
 	err = store.Write(demo.Id, demo)
 	if err != nil {

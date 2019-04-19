@@ -124,6 +124,7 @@ func (def *Descriptor) AutoKeyDefinition() string {
 func (def *Descriptor) TableFieldDefinition(field reflect.StructField) string {
 	// name := s.fieldMapper(field)
 	state := ""
+	// fmt.Println(field.Name, field.Type.Kind())
 	switch field.Type.Kind() {
 	case reflect.Bool:
 		state = "BOOLEAN DEFAULT false"
@@ -140,6 +141,10 @@ func (def *Descriptor) TableFieldDefinition(field reflect.StructField) string {
 	case reflect.Ptr:
 		if field.Type == ProtoTimestampType {
 			state = "DATETIME DEFAULT CURRENT_TIMESTAMP"
+		}
+	case reflect.Slice:
+		if field.Type.Elem().Kind() == reflect.String {
+			state = "VARCHAR(255) DEFAULT ''"
 		}
 	}
 	return field.Name + " " + state
