@@ -137,13 +137,25 @@ func (def *Descriptor) TableFieldDefinition(field reflect.StructField) string {
 	case reflect.Struct:
 		if field.Type == OriginTimeType {
 			state = "DATETIME DEFAULT CURRENT_TIMESTAMP"
+			break
+		} else {
+			state = "VARCHAR(255) DEFAULT ''"
 		}
 	case reflect.Ptr:
 		if field.Type == ProtoTimestampType {
 			state = "DATETIME DEFAULT CURRENT_TIMESTAMP"
+			break
+		}
+		if field.Type.Elem().Kind() == reflect.Struct {
+			state = "VARCHAR(255) DEFAULT ''"
+			break
 		}
 	case reflect.Slice:
-		if field.Type.Elem().Kind() == reflect.String {
+		subType := field.Type.Elem()
+		if subType.Kind() == reflect.String {
+			state = "VARCHAR(255) DEFAULT ''"
+		}
+		if subType.Kind() == reflect.Struct || subType.Kind() == reflect.Ptr {
 			state = "VARCHAR(255) DEFAULT ''"
 		}
 	}

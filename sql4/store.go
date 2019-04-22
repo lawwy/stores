@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"encoding/json"
+
 	"github.com/golang/protobuf/ptypes"
 	"github.com/golang/protobuf/ptypes/timestamp"
 )
@@ -100,28 +102,6 @@ func (s *SqlBackend) ModelDesriptor(model interface{}) *Descriptor {
 	}
 }
 
-// func (def *Descriptor) Record(key interface{}) (map[string]interface{}, error) {
-// 	query := fmt.Sprintf("select * from %s where %s = ?", def.table, def.key)
-// 	rows, err := def.backend.DB.Queryx(query, key)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	defer rows.Close()
-// 	for rows.Next() {
-// 		m := make(map[string]interface{})
-// 		err = rows.MapScan(m)
-// 		if err != nil {
-// 			if err == sql.ErrNoRows {
-// 				return nil, nil
-// 			}
-// 			return nil, err
-// 		}
-// 		return m, nil
-// 		// break
-// 	}
-// 	return nil, nil
-// }
-
 func (def *Descriptor) Record(key interface{}) (map[string]interface{}, error) {
 	query := fmt.Sprintf("select * from %s where %s = ?", def.table, def.key)
 	m := make(map[string]interface{})
@@ -196,10 +176,17 @@ func (def *Descriptor) RecordToModel(raw map[string]interface{}, model interface
 			}
 			fv.SetBool(true)
 		case reflect.Struct:
-			if reflect.TypeOf(v).AssignableTo(fv.Type()) {
+			// if reflect.TypeOf(v).AssignableTo(fv.Type()) {
+			// 	fv.Set(reflect.ValueOf(v))
+			// 	// break
+			// }
+			if ft.Type == OriginTimeType {
 				fv.Set(reflect.ValueOf(v))
-				// break
+				break
 			}
+			//普通结构体情况
+			_v := v.([]byte)
+			json.Unmarshal(_v, fv.Addr().Interface())
 		case reflect.Ptr:
 			if ft.Type == ProtoTimestampType {
 				_time, _ := reflect.ValueOf(v).Interface().(time.Time)
@@ -207,11 +194,22 @@ func (def *Descriptor) RecordToModel(raw map[string]interface{}, model interface
 				fv.Set(reflect.ValueOf(_v))
 				break
 			}
+			if ft.Type.Elem().Kind() == reflect.Struct {
+				_v := v.([]byte)
+				json.Unmarshal(_v, fv.Addr().Interface())
+				// fv.Set(reflect.ValueOf())
+			}
 		case reflect.Slice:
-			if ft.Type.Elem().Kind() == reflect.String {
+			subType := ft.Type.Elem()
+
+			if subType.Kind() == reflect.String {
 				_v := v.([]uint8)
 				_s := B2S(_v)
 				fv.Set(reflect.ValueOf(strings.Split(_s, SEP)))
+			}
+			if subType.Kind() == reflect.Ptr || subType.Kind() == reflect.Struct {
+				_v := v.([]byte)
+				json.Unmarshal(_v, fv.Addr().Interface())
 			}
 		}
 
@@ -234,9 +232,31 @@ func (def *Descriptor) ModelToRecord(model interface{}, raw map[string]interface
 			raw[ft.Name] = t
 			continue
 		}
-		if fv.Kind() == reflect.Slice && ft.Type.Elem().Kind() == reflect.String {
-			ss, _ := fv.Interface().([]string)
-			raw[ft.Name] = strings.Join(ss, SEP)
+		if ft.Type == OriginTimeType {
+			raw[ft.Name] = fv.Interface()
+			continue
+		}
+		if fv.Kind() == reflect.Slice {
+			subType := ft.Type.Elem()
+			if subType.Kind() == reflect.String {
+				ss, _ := fv.Interface().([]string)
+				raw[ft.Name] = strings.Join(ss, SEP)
+				continue
+			}
+			if subType.Kind() == reflect.Ptr || subType.Kind() == reflect.Struct {
+				b, _ := json.Marshal(fv.Interface())
+				raw[ft.Name] = string(b)
+				continue
+			}
+		}
+		if fv.Kind() == reflect.Ptr && ft.Type.Elem().Kind() == reflect.Struct {
+			b, _ := json.Marshal(fv.Interface())
+			raw[ft.Name] = string(b)
+			continue
+		}
+		if fv.Kind() == reflect.Struct {
+			b, _ := json.Marshal(fv.Interface())
+			raw[ft.Name] = string(b)
 			continue
 		}
 		raw[ft.Name] = fv.Interface()

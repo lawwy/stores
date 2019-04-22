@@ -13,19 +13,28 @@ import (
 )
 
 type Demo struct {
-	Id        string               `json:"id"`
-	Name      string               `json:"name"`
-	Content   string               `json:"content"`
-	I1        int                  `json:"i1"`
-	I32       int32                `json:"i32"`
-	I64       int64                `json:"i64"`
-	F32       float32              `json:"f32"`
-	F64       float64              `json:"f64"`
-	B         bool                 `json:"b"`
-	CreatedAt time.Time            `json:"createdAt"`
-	UpdatedAt *timestamp.Timestamp `json:"updatedAt"`
-	Keywords  []string             `json:"keywords"`
-	Others    string               `json:"-"`
+	Id          string               `json:"id"`
+	Name        string               `json:"name"`
+	Content     string               `json:"content"`
+	I1          int                  `json:"i1"`
+	I32         int32                `json:"i32"`
+	I64         int64                `json:"i64"`
+	F32         float32              `json:"f32"`
+	F64         float64              `json:"f64"`
+	B           bool                 `json:"b"`
+	CreatedAt   time.Time            `json:"createdAt"`
+	UpdatedAt   *timestamp.Timestamp `json:"updatedAt"`
+	Keywords    []string             `json:"keywords"`
+	Nested1     *NestedDemo          `json:"nested1"`
+	Nested2     NestedDemo           `json:"nested2"`
+	NestedList1 []*NestedDemo        `json:"nestedlist1"`
+	NestedList2 []NestedDemo         `json:"nestedlist2"`
+	Others      string               `json:"-"`
+}
+
+type NestedDemo struct {
+	Title string `json:"title"`
+	Name  string `json:"name"`
 }
 
 func setupSql() *SqlBackend {
@@ -41,8 +50,15 @@ func setupSql() *SqlBackend {
 func equalDemo(d1 *Demo, d2 *Demo) bool {
 	timediff := d1.CreatedAt.Unix() - d2.CreatedAt.Unix() //QUESTION:时间有一点偏差
 	protoTimediff := d1.UpdatedAt.GetSeconds() - d2.UpdatedAt.GetSeconds()
+	isCreatedAtSame := (timediff < 50 && timediff > -50)
+	isUpdatedAtSame := (protoTimediff < 5 && protoTimediff > -5)
 	isKeywordSame := reflect.DeepEqual(d1.Keywords, d2.Keywords)
-	if d1.Id == d2.Id && d1.Name == d2.Name && d1.Content == d2.Content && d1.I1 == d2.I1 && d1.I32 == d2.I32 && d1.I64 == d1.I64 && d1.F32 == d2.F32 && d1.F64 == d2.F64 && d1.B == d2.B && (timediff < 50 && timediff > -50) && (protoTimediff < 5 && protoTimediff > -5) && isKeywordSame {
+	isNested1Same := reflect.DeepEqual(d1.Nested1, d2.Nested1)
+	isNested2Same := reflect.DeepEqual(d1.Nested2, d2.Nested2)
+	isNestedList1Same := reflect.DeepEqual(d1.NestedList1, d2.NestedList1)
+	isNestedList2Same := reflect.DeepEqual(d1.NestedList2, d2.NestedList2)
+
+	if d1.Id == d2.Id && d1.Name == d2.Name && d1.Content == d2.Content && d1.I1 == d2.I1 && d1.I32 == d2.I32 && d1.I64 == d1.I64 && d1.F32 == d2.F32 && d1.F64 == d2.F64 && d1.B == d2.B && isCreatedAtSame && isUpdatedAtSame && isKeywordSame && isNested1Same && isNested2Same && isNestedList1Same && isNestedList2Same {
 		return true
 	}
 	return false
@@ -71,6 +87,16 @@ func TestStore(t *testing.T) {
 		UpdatedAt: ptypes.TimestampNow(),
 		Others:    "others1",
 		Keywords:  []string{"hello", "world"},
+		Nested1:   &NestedDemo{"title1", "name1"},
+		Nested2:   NestedDemo{"title2", "name2"},
+		NestedList1: []*NestedDemo{
+			&NestedDemo{"title3", "name3"},
+			&NestedDemo{"title4", "name4"},
+		},
+		NestedList2: []NestedDemo{
+			NestedDemo{"title5", "name5"},
+			NestedDemo{"title6", "name6"},
+		},
 	}
 	err = store.Write(demo.Id, demo)
 	if err != nil {
