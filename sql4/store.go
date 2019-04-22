@@ -14,8 +14,9 @@ import (
 )
 
 var (
-	ProtoTimestampType = reflect.TypeOf(&timestamp.Timestamp{})
-	OriginTimeType     = reflect.TypeOf(time.Now())
+	ProtoTimestampPtrType = reflect.TypeOf(&timestamp.Timestamp{})
+	ProtoTimestampType    = reflect.TypeOf(timestamp.Timestamp{})
+	OriginTimeType        = reflect.TypeOf(time.Now())
 )
 
 var SEP string = ";"
@@ -44,7 +45,7 @@ func (s *SqlBackend) Read(key interface{}, model interface{}) error {
 	if m == nil {
 		return sql.ErrNoRows
 	}
-	err = mdef.RecordToModel(m, model)
+	err = mdef.Record2Model(m, model)
 	if err != nil {
 		return err
 	}
@@ -60,7 +61,7 @@ func (s *SqlBackend) ReadAll(mlist interface{}) error {
 	}
 	for _, r := range rr {
 		vptr := reflect.New(t)
-		err = mdef.RecordToModel(r, vptr.Interface())
+		err = mdef.Record2Model(r, vptr.Interface())
 		if err != nil {
 			return nil
 		}
@@ -84,7 +85,7 @@ func (s *SqlBackend) Write(key interface{}, model interface{}) error {
 			return err
 		}
 	}
-	err = mdef.ModelToRecord(model, r)
+	err = mdef.Model2Record(model, r)
 	if err != nil {
 		return err
 	}
@@ -151,7 +152,7 @@ func (def *Descriptor) NewRecord(key interface{}) (map[string]interface{}, error
 	return m, nil
 }
 
-func (def *Descriptor) RecordToModel(raw map[string]interface{}, model interface{}) error {
+func (def *Descriptor) Record2Model(raw map[string]interface{}, model interface{}) error {
 	mt, mv := ModelTypeAndValue(model)
 	for k, v := range raw {
 		fv := mv.FieldByName(k)
@@ -188,7 +189,7 @@ func (def *Descriptor) RecordToModel(raw map[string]interface{}, model interface
 			_v := v.([]byte)
 			json.Unmarshal(_v, fv.Addr().Interface())
 		case reflect.Ptr:
-			if ft.Type == ProtoTimestampType {
+			if ft.Type == ProtoTimestampPtrType {
 				_time, _ := reflect.ValueOf(v).Interface().(time.Time)
 				_v, _ := ptypes.TimestampProto(_time)
 				fv.Set(reflect.ValueOf(_v))
@@ -218,7 +219,7 @@ func (def *Descriptor) RecordToModel(raw map[string]interface{}, model interface
 }
 
 //TODO:需过滤字段
-func (def *Descriptor) ModelToRecord(model interface{}, raw map[string]interface{}) error {
+func (def *Descriptor) Model2Record(model interface{}, raw map[string]interface{}) error {
 	t, v := ModelTypeAndValue(model)
 	for i := 0; i < t.NumField(); i++ {
 		ft := t.Field(i)
@@ -226,40 +227,40 @@ func (def *Descriptor) ModelToRecord(model interface{}, raw map[string]interface
 		if !def.fieldFilter(ft) || ft.Name == def.key {
 			continue
 		}
-		//TODO:proto timestamp to time.Time
-		if ft.Type == ProtoTimestampType {
-			t, _ := ptypes.Timestamp(fv.Interface().(*timestamp.Timestamp))
-			raw[ft.Name] = t
-			continue
-		}
-		if ft.Type == OriginTimeType {
-			raw[ft.Name] = fv.Interface()
-			continue
-		}
-		if fv.Kind() == reflect.Slice {
+		switch fv.Kind() {
+		case reflect.Ptr:
+			if ft.Type == ProtoTimestampPtrType {
+				t, _ := ptypes.Timestamp(fv.Interface().(*timestamp.Timestamp))
+				raw[ft.Name] = t
+				break
+			}
+			if ft.Type.Elem().Kind() == reflect.Struct {
+				b, _ := json.Marshal(fv.Interface())
+				raw[ft.Name] = string(b)
+				break
+			}
+		case reflect.Struct:
+			if ft.Type == OriginTimeType {
+				raw[ft.Name] = fv.Interface()
+				break
+			}
+			b, _ := json.Marshal(fv.Interface())
+			raw[ft.Name] = string(b)
+		case reflect.Slice:
 			subType := ft.Type.Elem()
 			if subType.Kind() == reflect.String {
 				ss, _ := fv.Interface().([]string)
 				raw[ft.Name] = strings.Join(ss, SEP)
-				continue
+				break
 			}
 			if subType.Kind() == reflect.Ptr || subType.Kind() == reflect.Struct {
 				b, _ := json.Marshal(fv.Interface())
 				raw[ft.Name] = string(b)
-				continue
+				break
 			}
+		default:
+			raw[ft.Name] = fv.Interface()
 		}
-		if fv.Kind() == reflect.Ptr && ft.Type.Elem().Kind() == reflect.Struct {
-			b, _ := json.Marshal(fv.Interface())
-			raw[ft.Name] = string(b)
-			continue
-		}
-		if fv.Kind() == reflect.Struct {
-			b, _ := json.Marshal(fv.Interface())
-			raw[ft.Name] = string(b)
-			continue
-		}
-		raw[ft.Name] = fv.Interface()
 	}
 	return nil
 }
