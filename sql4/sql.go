@@ -50,21 +50,33 @@ var (
 )
 
 type SqlBackend struct {
-	DB          *DB
-	autoKey     string
-	table       string
-	pk          string
-	fieldFilter StructFieldFilter
-	fieldMapper StructFieldMapper
+	DB             *DB
+	autoKey        string
+	table          string
+	pk             string
+	fieldFilter    StructFieldFilter
+	fieldMapper    StructFieldMapper
+	typeConverters map[reflect.Type]*TypeConverter
+}
+
+type TypeConverter struct {
+	DBRecord2Model     func(reflect.Value, interface{})
+	Model2DBRecord     func(reflect.Value) interface{}
+	Model2DBDefinition func() string
 }
 
 func NewSqlBackend(db *DB) (*SqlBackend, error) {
 	sql := &SqlBackend{
-		DB: db,
+		DB:             db,
+		typeConverters: make(map[reflect.Type]*TypeConverter),
 	}
 	// sql.fieldMapper = DefaultFieldMapper
 	// sql.SetFieldFilter(DefaultFieldFilter)
 	return sql, nil
+}
+
+func (s *SqlBackend) RegisterTypeConverter(t reflect.Type, convertor *TypeConverter) {
+	s.typeConverters[t] = convertor
 }
 
 // func (s *SqlBackend) SetFieldFilter(fn StructFieldFilter) {

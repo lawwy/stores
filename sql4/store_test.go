@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"os"
 	"reflect"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -30,11 +32,35 @@ type Demo struct {
 	NestedList1 []*NestedDemo        `json:"nestedlist1"`
 	NestedList2 []NestedDemo         `json:"nestedlist2"`
 	Others      string               `json:"-"`
+	Custom      *Custom              `json:"custom"`
 }
 
 type NestedDemo struct {
 	Title string `json:"title"`
 	Name  string `json:"name"`
+}
+
+type Custom struct {
+	Offset int
+	Limit  int
+}
+
+var CustomConverter *TypeConverter = &TypeConverter{
+	DBRecord2Model: func(fv reflect.Value, v interface{}) {
+		_v := v.([]uint8)
+		ss := strings.Split(B2S(_v), ",")
+		offset, _ := strconv.Atoi(ss[0])
+		limit, _ := strconv.Atoi(ss[1])
+		fv.Set(reflect.ValueOf(&Custom{offset, limit}))
+	},
+	Model2DBRecord: func(v reflect.Value) interface{} {
+		offset := v.Elem().Field(0).Interface().(int)
+		limit := v.Elem().Field(1).Interface().(int)
+		return strconv.Itoa(offset) + "," + strconv.Itoa(limit)
+	},
+	Model2DBDefinition: func() string {
+		return "VARCHAR(45) DEFAULT ''"
+	},
 }
 
 func setupSql() *SqlBackend {
@@ -57,8 +83,9 @@ func equalDemo(d1 *Demo, d2 *Demo) bool {
 	isNested2Same := reflect.DeepEqual(d1.Nested2, d2.Nested2)
 	isNestedList1Same := reflect.DeepEqual(d1.NestedList1, d2.NestedList1)
 	isNestedList2Same := reflect.DeepEqual(d1.NestedList2, d2.NestedList2)
+	isCustomSame := reflect.DeepEqual(d1.Custom, d2.Custom)
 
-	if d1.Id == d2.Id && d1.Name == d2.Name && d1.Content == d2.Content && d1.I1 == d2.I1 && d1.I32 == d2.I32 && d1.I64 == d1.I64 && d1.F32 == d2.F32 && d1.F64 == d2.F64 && d1.B == d2.B && isCreatedAtSame && isUpdatedAtSame && isKeywordSame && isNested1Same && isNested2Same && isNestedList1Same && isNestedList2Same {
+	if d1.Id == d2.Id && d1.Name == d2.Name && d1.Content == d2.Content && d1.I1 == d2.I1 && d1.I32 == d2.I32 && d1.I64 == d1.I64 && d1.F32 == d2.F32 && d1.F64 == d2.F64 && d1.B == d2.B && isCreatedAtSame && isUpdatedAtSame && isKeywordSame && isNested1Same && isNested2Same && isNestedList1Same && isNestedList2Same && isCustomSame {
 		return true
 	}
 	return false
@@ -67,6 +94,7 @@ func equalDemo(d1 *Demo, d2 *Demo) bool {
 
 func TestStore(t *testing.T) {
 	store := setupSql()
+	store.RegisterTypeConverter(reflect.TypeOf(&Custom{}), CustomConverter)
 	err := store.Migrate(&Demo{})
 	if err != nil {
 		t.Fatal("migrate fail", err)
@@ -97,6 +125,7 @@ func TestStore(t *testing.T) {
 			NestedDemo{"title5", "name5"},
 			NestedDemo{"title6", "name6"},
 		},
+		Custom: &Custom{10, 10},
 	}
 	err = store.Write(demo.Id, demo)
 	if err != nil {
