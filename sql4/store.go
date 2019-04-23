@@ -29,11 +29,12 @@ type Store interface {
 
 //TODO:tablename,tranlater...
 type Descriptor struct {
-	table       string
-	key         string
-	autoKey     string
-	backend     *SqlBackend
-	fieldFilter StructFieldFilter
+	table          string
+	key            string
+	autoKey        string
+	backend        *SqlBackend
+	fieldFilter    StructFieldFilter
+	typeConverters map[reflect.Type]*TypeConverter
 }
 
 func (s *SqlBackend) Read(key interface{}, model interface{}) error {
@@ -95,11 +96,12 @@ func (s *SqlBackend) Write(key interface{}, model interface{}) error {
 func (s *SqlBackend) ModelDesriptor(model interface{}) *Descriptor {
 	t, _ := ModelTypeAndValue(model)
 	return &Descriptor{
-		table:       t.Name(),
-		key:         "Id",
-		backend:     s,
-		fieldFilter: ProtoFieldFilter,
-		autoKey:     "autoId",
+		table:          t.Name(),
+		key:            "Id",
+		backend:        s,
+		fieldFilter:    ProtoFieldFilter,
+		autoKey:        "autoId",
+		typeConverters: s.typeConverters,
 	}
 }
 
@@ -158,6 +160,10 @@ func (def *Descriptor) Record2Model(raw map[string]interface{}, model interface{
 		fv := mv.FieldByName(k)
 		ft, _ := mt.FieldByName(k)
 		if !def.fieldFilter(ft) {
+			continue
+		}
+		if converter, ok := def.typeConverters[ft.Type]; ok {
+			converter.DBRecord2Model(fv, v)
 			continue
 		}
 		// fmt.Println(fv.Kind(), ft.Name)
@@ -225,6 +231,10 @@ func (def *Descriptor) Model2Record(model interface{}, raw map[string]interface{
 		ft := t.Field(i)
 		fv := v.Field(i)
 		if !def.fieldFilter(ft) || ft.Name == def.key {
+			continue
+		}
+		if converter, ok := def.typeConverters[ft.Type]; ok {
+			raw[ft.Name] = converter.Model2DBRecord(fv)
 			continue
 		}
 		switch fv.Kind() {

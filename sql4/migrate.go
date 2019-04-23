@@ -125,6 +125,10 @@ func (def *Descriptor) TableFieldDefinition(field reflect.StructField) string {
 	// name := s.fieldMapper(field)
 	state := ""
 	// fmt.Println(field.Name, field.Type.Kind())
+	if converter, ok := def.typeConverters[field.Type]; ok {
+		return field.Name + " " + converter.Model2DBDefinition()
+		// continue
+	}
 	switch field.Type.Kind() {
 	case reflect.Bool:
 		state = "BOOLEAN DEFAULT false"
