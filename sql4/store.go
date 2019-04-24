@@ -11,6 +11,7 @@ import (
 
 	"github.com/golang/protobuf/ptypes"
 	"github.com/golang/protobuf/ptypes/timestamp"
+	"github.com/yourhe/stores/queryer"
 )
 
 var (
@@ -56,7 +57,7 @@ func (s *SqlBackend) Read(key interface{}, model interface{}) error {
 func (s *SqlBackend) ReadAll(mlist interface{}) error {
 	t, lv := ListTypeAndValue(mlist)
 	mdef := s.ModelDesriptor(reflect.New(t).Interface())
-	rr, err := mdef.Records()
+	rr, err := mdef.Records(nil)
 	if err != nil {
 		return err
 	}
@@ -93,6 +94,32 @@ func (s *SqlBackend) Write(key interface{}, model interface{}) error {
 	return mdef.UpdateRecord(r)
 }
 
+// type SearchOption struct {
+// 	Limit  int32
+// 	Offset int32
+// 	Order  string
+// 	Query  string
+// }
+
+//TODO:重构
+func (s *SqlBackend) Find(query interface{}, mlist interface{}) error {
+	t, lv := ListTypeAndValue(mlist)
+	mdef := s.ModelDesriptor(reflect.New(t).Interface())
+	rr, err := mdef.Records(query)
+	if err != nil {
+		return err
+	}
+	for _, r := range rr {
+		vptr := reflect.New(t)
+		err = mdef.Record2Model(r, vptr.Interface())
+		if err != nil {
+			return nil
+		}
+		lv.Set(reflect.Append(lv, vptr))
+	}
+	return nil
+}
+
 func (s *SqlBackend) ModelDesriptor(model interface{}) *Descriptor {
 	t, _ := ModelTypeAndValue(model)
 	return &Descriptor{
@@ -118,8 +145,18 @@ func (def *Descriptor) Record(key interface{}) (map[string]interface{}, error) {
 	return m, nil
 }
 
-func (def *Descriptor) Records() ([]map[string]interface{}, error) {
+func (def *Descriptor) Records(q interface{}) ([]map[string]interface{}, error) {
 	query := fmt.Sprintf("select * from %s", def.table)
+	if q != nil {
+		searchOpt := q.(*SearchOption)
+		sql, err := searchOpt.Source(&queryer.Sql{})
+		if err != nil {
+			return nil, nil
+		}
+		cond := sql.(string)
+		query = query + " " + cond
+	}
+	fmt.Println(query)
 	// rows, err := def.backend.DB.Queryx(query, def.table)
 	st, err := def.backend.DB.Preparex(query)
 	if err != nil {

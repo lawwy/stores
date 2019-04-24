@@ -12,6 +12,7 @@ import (
 	"github.com/golang/protobuf/ptypes"
 	"github.com/golang/protobuf/ptypes/timestamp"
 	"github.com/joho/godotenv"
+	"github.com/yourhe/stores/queryer"
 )
 
 type Demo struct {
@@ -157,4 +158,59 @@ func TestStore(t *testing.T) {
 	if err != nil || notExistErr != sql.ErrNoRows {
 		t.Fatal("delete fail", err, notExistErr)
 	}
+}
+
+type Demo2 struct {
+	Id       int    `json:"id"`
+	Source   string `json:"source"`
+	Category string `json:"category"`
+	Name     string `json:"name"`
+}
+
+func TestSearch(t *testing.T) {
+	store := setupSql()
+	err := store.Migrate(&Demo2{})
+	if err != nil {
+		t.Fatal("migrate fail", err)
+	}
+	defer store.Drop(&Demo2{})
+	demos := []*Demo2{
+		&Demo2{1, "s1", "c1", "name1"},
+		&Demo2{2, "s1", "c2", "name2"},
+		&Demo2{3, "s2", "c1", "name3"},
+		&Demo2{4, "s2", "c2", "name4"},
+		&Demo2{5, "s3", "c1", "name5"},
+	}
+	tests := []struct {
+		opt  *SearchOption
+		want []*Demo2
+	}{
+		{
+			opt: NewSearchOption().Offset(1).Limit(2).Sort("Id", true),
+			want: []*Demo2{
+				&Demo2{4, "s2", "c2", "name4"},
+				&Demo2{3, "s2", "c1", "name3"},
+			},
+		},
+		{
+			opt: NewSearchOption().Must(queryer.NewTermQuery("Category", "c1")).
+				Must((queryer.NewBoolQuery().Must(queryer.NewTermQuery("Id", 1)).Should(queryer.NewTermQuery("Source", "s2")))),
+			want: []*Demo2{
+				&Demo2{1, "s1", "c1", "name1"},
+				&Demo2{3, "s2", "c1", "name3"},
+			},
+		},
+	}
+	for _, d := range demos {
+		store.Write(d.Id, d)
+	}
+	for _, data := range tests {
+		res := []*Demo2{}
+		err = store.Find(data.opt, &res)
+		if err != nil || !reflect.DeepEqual(res, data.want) {
+			t.Fatal("Find fail", err)
+		}
+	}
+	// defer store.DB.Exec("TRUNCATE Demo;")
+
 }
