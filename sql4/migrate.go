@@ -125,8 +125,12 @@ func (def *Descriptor) TableFieldDefinition(field reflect.StructField) string {
 	// name := s.fieldMapper(field)
 	state := ""
 	// fmt.Println(field.Name, field.Type.Kind())
+	dbfname := def.fieldMapper(field)
+	if dbfname == "" {
+		return ""
+	}
 	if converter, ok := def.typeConverters[field.Type]; ok {
-		return field.Name + " " + converter.Model2DBDefinition()
+		return dbfname + " " + converter.Model2DBDefinition()
 		// continue
 	}
 	switch field.Type.Kind() {
@@ -163,5 +167,5 @@ func (def *Descriptor) TableFieldDefinition(field reflect.StructField) string {
 			state = "VARCHAR(255) DEFAULT ''"
 		}
 	}
-	return field.Name + " " + state
+	return dbfname + " " + state
 }

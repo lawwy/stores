@@ -2,6 +2,7 @@ package sql4
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -26,16 +27,6 @@ type Store interface {
 	Write(interface{}, interface{}) error
 	Read(interface{}, interface{}) error // key, out set value interface{}
 	ReadAll(interface{}) error
-}
-
-//TODO:tablename,tranlater...
-type Descriptor struct {
-	table          string
-	key            string
-	autoKey        string
-	backend        *SqlBackend
-	fieldFilter    StructFieldFilter
-	typeConverters map[reflect.Type]*TypeConverter
 }
 
 func (s *SqlBackend) Read(key interface{}, model interface{}) error {
@@ -81,13 +72,15 @@ func (s *SqlBackend) Write(key interface{}, model interface{}) error {
 	if err != nil {
 		return err
 	}
-	if r == nil {
-		r, err = mdef.NewRecord(key)
+	//QUESTIONS:这里r的作用只是判断是否存在，是否小题大作了？
+	if r == nil || key == nil {
+		r, err = mdef.Model2Record(model)
 		if err != nil {
 			return err
 		}
+		return mdef.NewRecord(key, r)
 	}
-	err = mdef.Model2Record(model, r)
+	r, err = mdef.Model2Record(model)
 	if err != nil {
 		return err
 	}
@@ -120,6 +113,19 @@ func (s *SqlBackend) Find(query interface{}, mlist interface{}) error {
 	return nil
 }
 
+// type KeyGenerator func() interface{}
+
+type Descriptor struct {
+	table          string
+	key            string
+	autoKey        string
+	backend        *SqlBackend
+	fieldFilter    StructFieldFilter
+	fieldMapper    StructFieldMapper
+	typeConverters map[reflect.Type]*TypeConverter
+	// keyGen         KeyGenerator
+}
+
 func (s *SqlBackend) ModelDesriptor(model interface{}) *Descriptor {
 	t, _ := ModelTypeAndValue(model)
 	return &Descriptor{
@@ -127,12 +133,16 @@ func (s *SqlBackend) ModelDesriptor(model interface{}) *Descriptor {
 		key:            "Id",
 		backend:        s,
 		fieldFilter:    ProtoFieldFilter,
+		fieldMapper:    DefaultFieldMapper,
 		autoKey:        "autoId",
 		typeConverters: s.typeConverters,
 	}
 }
 
 func (def *Descriptor) Record(key interface{}) (map[string]interface{}, error) {
+	if key == nil {
+		return nil, nil
+	}
 	query := fmt.Sprintf("select * from %s where %s = ?", def.table, def.key)
 	m := make(map[string]interface{})
 	err := def.backend.DB.QueryRowx(query, key).MapScan(m)
@@ -156,7 +166,6 @@ func (def *Descriptor) Records(q interface{}) ([]map[string]interface{}, error) 
 		cond := sql.(string)
 		query = query + " " + cond
 	}
-	fmt.Println(query)
 	// rows, err := def.backend.DB.Queryx(query, def.table)
 	st, err := def.backend.DB.Preparex(query)
 	if err != nil {
@@ -180,30 +189,55 @@ func (def *Descriptor) Records(q interface{}) ([]map[string]interface{}, error) 
 }
 
 //UNSTABLE
-func (def *Descriptor) NewRecord(key interface{}) (map[string]interface{}, error) {
-	cmd := fmt.Sprintf("insert into %s (%s) values (?)", def.table, def.key)
-	_, err := def.backend.DB.Exec(cmd, key)
-	if err != nil {
-		return nil, err
+func (def *Descriptor) NewRecord(key interface{}, raw map[string]interface{}) error {
+	vstubs := []string{}
+	fnames := []string{}
+	if raw[def.key] == nil {
+		raw[def.key] = key
+		if key == nil {
+			return errors.New("key is required.")
+		}
 	}
-	m := make(map[string]interface{})
-	m[def.key] = key
-	return m, nil
+	for k := range raw {
+		s := ":" + k
+		vstubs = append(vstubs, s)
+		fnames = append(fnames, k)
+	}
+	cmd := "insert into " + def.table + " ( " + strings.Join(fnames, ",") + ") values( " + strings.Join(vstubs, ",") + " )"
+	_, err := def.backend.DB.NamedExec(cmd, raw)
+	if err != nil {
+		return err
+	}
+	return nil
 }
+
+// func (def *Descriptor) NewRecord(key interface{}) (map[string]interface{}, error) {
+// 	cmd := fmt.Sprintf("insert into %s (%s) values (?)", def.table, def.key)
+// 	_, err := def.backend.DB.Exec(cmd, key)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	m := make(map[string]interface{})
+// 	m[def.key] = key
+// 	return m, nil
+// }
 
 func (def *Descriptor) Record2Model(raw map[string]interface{}, model interface{}) error {
 	mt, mv := ModelTypeAndValue(model)
-	for k, v := range raw {
-		fv := mv.FieldByName(k)
-		ft, _ := mt.FieldByName(k)
+	// fields := StructFields(mt, def.fieldFilter)
+	for i := 0; i < mt.NumField(); i++ {
+		fv := mv.Field(i)
+		ft := mt.Field(i)
+		v, ok := raw[def.fieldMapper(ft)] //是否需要mapper
+		if !ok {
+			continue
+		}
 		if !def.fieldFilter(ft) {
 			continue
 		}
 		if converter, ok := def.typeConverters[ft.Type]; ok {
 			converter.DBRecord2Model(fv, v)
-			continue
 		}
-		// fmt.Println(fv.Kind(), ft.Name)
 		switch fv.Kind() {
 		//TODO:proto中的timestamp类型转换
 		case reflect.String:
@@ -256,60 +290,63 @@ func (def *Descriptor) Record2Model(raw map[string]interface{}, model interface{
 				json.Unmarshal(_v, fv.Addr().Interface())
 			}
 		}
-
 	}
 	return nil
 }
 
-//TODO:需过滤字段
-func (def *Descriptor) Model2Record(model interface{}, raw map[string]interface{}) error {
+func (def *Descriptor) Model2Record(model interface{}) (map[string]interface{}, error) {
 	t, v := ModelTypeAndValue(model)
+	raw := make(map[string]interface{})
 	for i := 0; i < t.NumField(); i++ {
 		ft := t.Field(i)
 		fv := v.Field(i)
-		if !def.fieldFilter(ft) || ft.Name == def.key {
+		if !def.fieldFilter(ft) {
+			continue
+		}
+		dbfname := def.fieldMapper(ft)
+		if dbfname == "" {
 			continue
 		}
 		if converter, ok := def.typeConverters[ft.Type]; ok {
-			raw[ft.Name] = converter.Model2DBRecord(fv)
+			raw[dbfname] = converter.Model2DBRecord(fv)
 			continue
 		}
 		switch fv.Kind() {
 		case reflect.Ptr:
 			if ft.Type == ProtoTimestampPtrType {
 				t, _ := ptypes.Timestamp(fv.Interface().(*timestamp.Timestamp))
-				raw[ft.Name] = t
+				raw[dbfname] = t
 				break
 			}
 			if ft.Type.Elem().Kind() == reflect.Struct {
 				b, _ := json.Marshal(fv.Interface())
-				raw[ft.Name] = string(b)
+				raw[dbfname] = string(b)
 				break
 			}
 		case reflect.Struct:
 			if ft.Type == OriginTimeType {
-				raw[ft.Name] = fv.Interface()
+				raw[dbfname] = fv.Interface()
 				break
 			}
 			b, _ := json.Marshal(fv.Interface())
-			raw[ft.Name] = string(b)
+			raw[dbfname] = string(b)
 		case reflect.Slice:
 			subType := ft.Type.Elem()
 			if subType.Kind() == reflect.String {
 				ss, _ := fv.Interface().([]string)
-				raw[ft.Name] = strings.Join(ss, SEP)
+				raw[dbfname] = strings.Join(ss, SEP)
 				break
 			}
 			if subType.Kind() == reflect.Ptr || subType.Kind() == reflect.Struct {
 				b, _ := json.Marshal(fv.Interface())
-				raw[ft.Name] = string(b)
+				raw[dbfname] = string(b)
 				break
 			}
 		default:
-			raw[ft.Name] = fv.Interface()
+			raw[dbfname] = fv.Interface()
 		}
 	}
-	return nil
+	return raw, nil
 }
 
 func (def *Descriptor) UpdateRecord(raw map[string]interface{}) error {
@@ -329,6 +366,9 @@ func (def *Descriptor) UpdateRecord(raw map[string]interface{}) error {
 }
 
 func (def *Descriptor) RemoveRecord(key interface{}) error {
+	if key == nil {
+		return nil
+	}
 	cmd := fmt.Sprintf("delete from %s where %s=?", def.table, def.key)
 	_, err := def.backend.DB.Exec(cmd, key)
 	if err != nil {
