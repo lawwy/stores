@@ -28,16 +28,6 @@ type Store interface {
 	ReadAll(interface{}) error
 }
 
-//TODO:tablename,tranlater...
-type Descriptor struct {
-	table          string
-	key            string
-	autoKey        string
-	backend        *SqlBackend
-	fieldFilter    StructFieldFilter
-	typeConverters map[reflect.Type]*TypeConverter
-}
-
 func (s *SqlBackend) Read(key interface{}, model interface{}) error {
 	mdef := s.ModelDesriptor(model)
 	m, err := mdef.Record(key)
@@ -120,6 +110,16 @@ func (s *SqlBackend) Find(query interface{}, mlist interface{}) error {
 	return nil
 }
 
+type Descriptor struct {
+	table          string
+	key            string
+	autoKey        string
+	backend        *SqlBackend
+	fieldFilter    StructFieldFilter
+	fieldMapper    StructFieldMapper
+	typeConverters map[reflect.Type]*TypeConverter
+}
+
 func (s *SqlBackend) ModelDesriptor(model interface{}) *Descriptor {
 	t, _ := ModelTypeAndValue(model)
 	return &Descriptor{
@@ -127,6 +127,7 @@ func (s *SqlBackend) ModelDesriptor(model interface{}) *Descriptor {
 		key:            "Id",
 		backend:        s,
 		fieldFilter:    ProtoFieldFilter,
+		fieldMapper:    DefaultFieldMapper,
 		autoKey:        "autoId",
 		typeConverters: s.typeConverters,
 	}
@@ -193,17 +194,20 @@ func (def *Descriptor) NewRecord(key interface{}) (map[string]interface{}, error
 
 func (def *Descriptor) Record2Model(raw map[string]interface{}, model interface{}) error {
 	mt, mv := ModelTypeAndValue(model)
-	for k, v := range raw {
-		fv := mv.FieldByName(k)
-		ft, _ := mt.FieldByName(k)
+	// fields := StructFields(mt, def.fieldFilter)
+	for i := 0; i < mt.NumField(); i++ {
+		fv := mv.Field(i)
+		ft := mt.Field(i)
+		v, ok := raw[def.fieldMapper(ft)] //是否需要mapper
+		if !ok {
+			continue
+		}
 		if !def.fieldFilter(ft) {
 			continue
 		}
 		if converter, ok := def.typeConverters[ft.Type]; ok {
 			converter.DBRecord2Model(fv, v)
-			continue
 		}
-		// fmt.Println(fv.Kind(), ft.Name)
 		switch fv.Kind() {
 		//TODO:proto中的timestamp类型转换
 		case reflect.String:
@@ -256,12 +260,10 @@ func (def *Descriptor) Record2Model(raw map[string]interface{}, model interface{
 				json.Unmarshal(_v, fv.Addr().Interface())
 			}
 		}
-
 	}
 	return nil
 }
 
-//TODO:需过滤字段
 func (def *Descriptor) Model2Record(model interface{}, raw map[string]interface{}) error {
 	t, v := ModelTypeAndValue(model)
 	for i := 0; i < t.NumField(); i++ {
@@ -270,43 +272,47 @@ func (def *Descriptor) Model2Record(model interface{}, raw map[string]interface{
 		if !def.fieldFilter(ft) || ft.Name == def.key {
 			continue
 		}
+		dbfname := def.fieldMapper(ft)
+		if dbfname == "" {
+			continue
+		}
 		if converter, ok := def.typeConverters[ft.Type]; ok {
-			raw[ft.Name] = converter.Model2DBRecord(fv)
+			raw[dbfname] = converter.Model2DBRecord(fv)
 			continue
 		}
 		switch fv.Kind() {
 		case reflect.Ptr:
 			if ft.Type == ProtoTimestampPtrType {
 				t, _ := ptypes.Timestamp(fv.Interface().(*timestamp.Timestamp))
-				raw[ft.Name] = t
+				raw[dbfname] = t
 				break
 			}
 			if ft.Type.Elem().Kind() == reflect.Struct {
 				b, _ := json.Marshal(fv.Interface())
-				raw[ft.Name] = string(b)
+				raw[dbfname] = string(b)
 				break
 			}
 		case reflect.Struct:
 			if ft.Type == OriginTimeType {
-				raw[ft.Name] = fv.Interface()
+				raw[dbfname] = fv.Interface()
 				break
 			}
 			b, _ := json.Marshal(fv.Interface())
-			raw[ft.Name] = string(b)
+			raw[dbfname] = string(b)
 		case reflect.Slice:
 			subType := ft.Type.Elem()
 			if subType.Kind() == reflect.String {
 				ss, _ := fv.Interface().([]string)
-				raw[ft.Name] = strings.Join(ss, SEP)
+				raw[dbfname] = strings.Join(ss, SEP)
 				break
 			}
 			if subType.Kind() == reflect.Ptr || subType.Kind() == reflect.Struct {
 				b, _ := json.Marshal(fv.Interface())
-				raw[ft.Name] = string(b)
+				raw[dbfname] = string(b)
 				break
 			}
 		default:
-			raw[ft.Name] = fv.Interface()
+			raw[dbfname] = fv.Interface()
 		}
 	}
 	return nil

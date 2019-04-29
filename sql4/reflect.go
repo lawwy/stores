@@ -6,7 +6,7 @@ func StructFields(t reflect.Type, need StructFieldFilter) []reflect.StructField 
 	ff := []reflect.StructField{}
 	for i := 0; i < t.NumField(); i++ {
 		f := t.Field(i)
-		if need(f) {
+		if need != nil && need(f) {
 			ff = append(ff, f)
 		}
 	}
