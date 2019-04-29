@@ -2,6 +2,7 @@ package sql4
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -71,13 +72,15 @@ func (s *SqlBackend) Write(key interface{}, model interface{}) error {
 	if err != nil {
 		return err
 	}
-	if r == nil {
-		r, err = mdef.NewRecord(key)
+	//QUESTIONS:这里r的作用只是判断是否存在，是否小题大作了？
+	if r == nil || key == nil {
+		r, err = mdef.Model2Record(model)
 		if err != nil {
 			return err
 		}
+		return mdef.NewRecord(key, r)
 	}
-	err = mdef.Model2Record(model, r)
+	r, err = mdef.Model2Record(model)
 	if err != nil {
 		return err
 	}
@@ -110,6 +113,8 @@ func (s *SqlBackend) Find(query interface{}, mlist interface{}) error {
 	return nil
 }
 
+// type KeyGenerator func() interface{}
+
 type Descriptor struct {
 	table          string
 	key            string
@@ -118,6 +123,7 @@ type Descriptor struct {
 	fieldFilter    StructFieldFilter
 	fieldMapper    StructFieldMapper
 	typeConverters map[reflect.Type]*TypeConverter
+	// keyGen         KeyGenerator
 }
 
 func (s *SqlBackend) ModelDesriptor(model interface{}) *Descriptor {
@@ -134,6 +140,9 @@ func (s *SqlBackend) ModelDesriptor(model interface{}) *Descriptor {
 }
 
 func (def *Descriptor) Record(key interface{}) (map[string]interface{}, error) {
+	if key == nil {
+		return nil, nil
+	}
 	query := fmt.Sprintf("select * from %s where %s = ?", def.table, def.key)
 	m := make(map[string]interface{})
 	err := def.backend.DB.QueryRowx(query, key).MapScan(m)
@@ -157,7 +166,6 @@ func (def *Descriptor) Records(q interface{}) ([]map[string]interface{}, error) 
 		cond := sql.(string)
 		query = query + " " + cond
 	}
-	fmt.Println(query)
 	// rows, err := def.backend.DB.Queryx(query, def.table)
 	st, err := def.backend.DB.Preparex(query)
 	if err != nil {
@@ -181,16 +189,38 @@ func (def *Descriptor) Records(q interface{}) ([]map[string]interface{}, error) 
 }
 
 //UNSTABLE
-func (def *Descriptor) NewRecord(key interface{}) (map[string]interface{}, error) {
-	cmd := fmt.Sprintf("insert into %s (%s) values (?)", def.table, def.key)
-	_, err := def.backend.DB.Exec(cmd, key)
-	if err != nil {
-		return nil, err
+func (def *Descriptor) NewRecord(key interface{}, raw map[string]interface{}) error {
+	vstubs := []string{}
+	fnames := []string{}
+	if raw[def.key] == nil {
+		raw[def.key] = key
+		if key == nil {
+			return errors.New("key is required.")
+		}
 	}
-	m := make(map[string]interface{})
-	m[def.key] = key
-	return m, nil
+	for k := range raw {
+		s := ":" + k
+		vstubs = append(vstubs, s)
+		fnames = append(fnames, k)
+	}
+	cmd := "insert into " + def.table + " ( " + strings.Join(fnames, ",") + ") values( " + strings.Join(vstubs, ",") + " )"
+	_, err := def.backend.DB.NamedExec(cmd, raw)
+	if err != nil {
+		return err
+	}
+	return nil
 }
+
+// func (def *Descriptor) NewRecord(key interface{}) (map[string]interface{}, error) {
+// 	cmd := fmt.Sprintf("insert into %s (%s) values (?)", def.table, def.key)
+// 	_, err := def.backend.DB.Exec(cmd, key)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	m := make(map[string]interface{})
+// 	m[def.key] = key
+// 	return m, nil
+// }
 
 func (def *Descriptor) Record2Model(raw map[string]interface{}, model interface{}) error {
 	mt, mv := ModelTypeAndValue(model)
@@ -264,12 +294,13 @@ func (def *Descriptor) Record2Model(raw map[string]interface{}, model interface{
 	return nil
 }
 
-func (def *Descriptor) Model2Record(model interface{}, raw map[string]interface{}) error {
+func (def *Descriptor) Model2Record(model interface{}) (map[string]interface{}, error) {
 	t, v := ModelTypeAndValue(model)
+	raw := make(map[string]interface{})
 	for i := 0; i < t.NumField(); i++ {
 		ft := t.Field(i)
 		fv := v.Field(i)
-		if !def.fieldFilter(ft) || ft.Name == def.key {
+		if !def.fieldFilter(ft) {
 			continue
 		}
 		dbfname := def.fieldMapper(ft)
@@ -315,7 +346,7 @@ func (def *Descriptor) Model2Record(model interface{}, raw map[string]interface{
 			raw[dbfname] = fv.Interface()
 		}
 	}
-	return nil
+	return raw, nil
 }
 
 func (def *Descriptor) UpdateRecord(raw map[string]interface{}) error {
@@ -335,6 +366,9 @@ func (def *Descriptor) UpdateRecord(raw map[string]interface{}) error {
 }
 
 func (def *Descriptor) RemoveRecord(key interface{}) error {
+	if key == nil {
+		return nil
+	}
 	cmd := fmt.Sprintf("delete from %s where %s=?", def.table, def.key)
 	_, err := def.backend.DB.Exec(cmd, key)
 	if err != nil {
